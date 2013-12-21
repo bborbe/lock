@@ -36,7 +36,7 @@ func TestLocking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	err = AssertThat(result, Is(false))
 	if err != nil {
 		t.Fatal(err)

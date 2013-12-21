@@ -35,7 +35,7 @@ func (l *lock) Lock() error {
 			return err
 		}
 	}
-	err = syscall.Flock(int(l.file.Fd()), syscall.LOCK_EX | syscall.LOCK_NB)
+	err = syscall.Flock(int(l.file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
 		logger.Debug("lock fail, already locked")
 		return err
