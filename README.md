@@ -8,6 +8,11 @@ Documentation
 
 http://godoc.org/github.com/bborbe/lock
 
+Continuous integration
+----------------------
+
+http://jenkins.benjamin-borbe.de/job/Go-Lock/
+
 Copyright and license
 ---------------------
 
