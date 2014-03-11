@@ -1,9 +1,10 @@
 package lock
 
 import (
-	"github.com/bborbe/log"
 	"os"
 	"syscall"
+
+	"github.com/bborbe/log"
 )
 
 type Lock interface {

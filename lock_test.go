@@ -1,10 +1,10 @@
 package lock
 
 import (
-	. "github.com/bborbe/assert"
 	"os"
 	"testing"
 	"time"
+	. "github.com/bborbe/assert"
 )
 
 func TestLocking(t *testing.T) {
