@@ -1,4 +1,4 @@
-# lock
+# Lock
 
 Simple Lock in Go
 
