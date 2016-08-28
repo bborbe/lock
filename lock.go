@@ -4,7 +4,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/bborbe/log"
+	"github.com/golang/glog"
 )
 
 type Lock interface {
@@ -17,8 +17,6 @@ type lock struct {
 	file     *os.File
 }
 
-var logger = log.DefaultLogger
-
 func NewLock(lockName string) *lock {
 	l := new(lock)
 	l.lockName = lockName
@@ -26,33 +24,33 @@ func NewLock(lockName string) *lock {
 }
 
 func (l *lock) Lock() error {
-	logger.Debug("try lock")
+	glog.V(2).Info("try lock")
 	var err error
 	l.file, _ = os.Open(l.lockName)
 	if l.file == nil {
 		l.file, err = os.Create(l.lockName)
 		if err != nil {
-			logger.Debug("create lock file failed")
+			glog.V(2).Info("create lock file failed")
 			return err
 		}
 	}
 	err = syscall.Flock(int(l.file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
-		logger.Debug("lock fail, already locked")
+		glog.V(2).Info("lock fail, already locked")
 		return err
 	}
-	logger.Debug("locked")
+	glog.V(2).Info("locked")
 	return nil
 }
 
 func (l *lock) Unlock() error {
-	logger.Debug("try unlock")
+	glog.V(2).Info("try unlock")
 	var err error
 	err = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
 	if err != nil {
-		logger.Debug("unlock failed")
+		glog.V(2).Info("unlock failed")
 		return err
 	}
-	logger.Debug("unlocked")
+	glog.V(2).Info("unlocked")
 	return l.file.Close()
 }
