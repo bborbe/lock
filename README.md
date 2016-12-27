@@ -4,7 +4,7 @@ Simple Lock in Go
 
 ## Continuous integration
 
-[Jenkins](https://www.benjamin-borbe.de/jenkins/job/Go-Lock/)
+[Jenkins](https://jenkins.benjamin-borbe.de/job/Go-Lock/)
 
 ## Copyright and license
 
