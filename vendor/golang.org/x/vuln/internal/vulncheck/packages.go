@@ -7,10 +7,12 @@ package vulncheck
 import (
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/vuln/internal"
+	"golang.org/x/vuln/internal/govulncheck"
 	"golang.org/x/vuln/internal/semver"
 )
 
@@ -194,18 +196,12 @@ func (g *PackageGraph) GetPackage(path string) *packages.Package {
 
 // LoadPackages loads the packages specified by the patterns into the graph.
 // See golang.org/x/tools/go/packages.Load for details of how it works.
-func (g *PackageGraph) LoadPackagesAndMods(cfg *packages.Config, tags []string, patterns []string) error {
+func (g *PackageGraph) LoadPackagesAndMods(cfg *packages.Config, tags []string, patterns []string, wantSymbols bool) error {
 	if len(tags) > 0 {
 		cfg.BuildFlags = []string{fmt.Sprintf("-tags=%s", strings.Join(tags, ","))}
 	}
-	cfg.Mode |=
-		packages.NeedDeps |
-			packages.NeedImports |
-			packages.NeedModule |
-			packages.NeedSyntax |
-			packages.NeedTypes |
-			packages.NeedTypesInfo |
-			packages.NeedName
+
+	addLoadMode(cfg, wantSymbols)
 
 	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
@@ -230,6 +226,17 @@ func (g *PackageGraph) LoadPackagesAndMods(cfg *packages.Config, tags []string, 
 	return err
 }
 
+func addLoadMode(cfg *packages.Config, wantSymbols bool) {
+	cfg.Mode |=
+		packages.NeedModule |
+			packages.NeedName |
+			packages.NeedDeps |
+			packages.NeedImports
+	if wantSymbols {
+		cfg.Mode |= packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo
+	}
+}
+
 // packageError contains errors from loading a set of packages.
 type packageError struct {
 	Errors []packages.Error
@@ -244,4 +251,68 @@ func (e *packageError) Error() string {
 	}
 	fmt.Fprintln(&b, "\nFor details on package patterns, see https://pkg.go.dev/cmd/go#hdr-Package_lists_and_patterns.")
 	return b.String()
+}
+
+func (g *PackageGraph) SBOM() *govulncheck.SBOM {
+	getMod := func(mod *packages.Module) *govulncheck.Module {
+		if mod.Replace != nil {
+			return &govulncheck.Module{
+				Path:    mod.Replace.Path,
+				Version: mod.Replace.Version,
+			}
+		}
+
+		return &govulncheck.Module{
+			Path:    mod.Path,
+			Version: mod.Version,
+		}
+	}
+
+	var roots []string
+	rootMods := make(map[string]*govulncheck.Module)
+	for _, pkg := range g.TopPkgs() {
+		roots = append(roots, pkg.PkgPath)
+		mod := getMod(pkg.Module)
+		rootMods[mod.Path] = mod
+	}
+
+	// Govulncheck attempts to put the modules that correspond to the matched package patterns (i.e. the root modules)
+	// at the beginning of the SBOM.Modules message.
+	// Note: This does not guarantee that the first element is the root module.
+	var topMods, depMods []*govulncheck.Module
+	var goVersion string
+	for _, mod := range g.Modules() {
+		mod := getMod(mod)
+
+		if mod.Path == internal.GoStdModulePath {
+			goVersion = semver.SemverToGoTag(mod.Version)
+		}
+
+		// if the mod is not associated with a root package, add it to depMods
+		if rootMods[mod.Path] == nil {
+			depMods = append(depMods, mod)
+		}
+	}
+
+	for _, mod := range rootMods {
+		topMods = append(topMods, mod)
+	}
+	// Sort for deterministic output
+	sortMods(topMods)
+	sortMods(depMods)
+
+	mods := append(topMods, depMods...)
+
+	return &govulncheck.SBOM{
+		GoVersion: goVersion,
+		Modules:   mods,
+		Roots:     roots,
+	}
+}
+
+// Sorts modules alphabetically by path.
+func sortMods(mods []*govulncheck.Module) {
+	slices.SortFunc(mods, func(a, b *govulncheck.Module) int {
+		return strings.Compare(a.Path, b.Path)
+	})
 }

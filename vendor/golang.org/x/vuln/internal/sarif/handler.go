@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 
 	"golang.org/x/vuln/internal"
@@ -36,12 +37,17 @@ func NewHandler(w io.Writer) *handler {
 		findings: make(map[string][]*govulncheck.Finding),
 	}
 }
+
 func (h *handler) Config(c *govulncheck.Config) error {
 	h.cfg = c
 	return nil
 }
 
 func (h *handler) Progress(p *govulncheck.Progress) error {
+	return nil // not needed by sarif
+}
+
+func (h *handler) SBOM(s *govulncheck.SBOM) error {
 	return nil // not needed by sarif
 }
 
@@ -136,7 +142,7 @@ func toSarif(h *handler) Log {
 }
 
 func rules(h *handler) []Rule {
-	var rs []Rule
+	rs := make([]Rule, 0, len(h.findings)) // must not be nil
 	for id := range h.findings {
 		osv := h.osvs[id]
 		// s is either summary if it exists, or details
@@ -151,16 +157,25 @@ func rules(h *handler) []Rule {
 			FullDescription:  Description{Text: s},
 			HelpURI:          fmt.Sprintf("https://pkg.go.dev/vuln/%s", osv.ID),
 			Help:             Description{Text: osv.Details},
-			Properties:       RuleTags{Tags: osv.Aliases},
+			Properties:       RuleTags{Tags: tags(osv)},
 		})
 	}
 	sort.SliceStable(rs, func(i, j int) bool { return rs[i].ID < rs[j].ID })
 	return rs
 }
 
+// tags returns an slice of zero or
+// more aliases of o.
+func tags(o *osv.Entry) []string {
+	if len(o.Aliases) > 0 {
+		return o.Aliases
+	}
+	return []string{} // must not be nil
+}
+
 func results(h *handler) []Result {
-	var results []Result
-	for _, fs := range h.findings {
+	results := make([]Result, 0, len(h.findings)) // must not be nil
+	for osv, fs := range h.findings {
 		var locs []Location
 		if h.cfg.ScanMode != govulncheck.ScanModeBinary {
 			// Attach result to the go.mod file for source analysis.
@@ -171,11 +186,13 @@ func results(h *handler) []Result {
 					URIBaseID: SrcRootID,
 				},
 				Region: Region{StartLine: 1}, // for now, point to the first line
-			}}}
+			},
+				Message: Description{Text: fmt.Sprintf("Findings for vulnerability %s", osv)}, // not having a message here results in an invalid sarif
+			}}
 		}
 
 		res := Result{
-			RuleID:    fs[0].OSV,
+			RuleID:    osv,
 			Level:     level(fs[0], h.cfg),
 			Message:   Description{Text: resultMessage(fs, h.cfg)},
 			Stacks:    stacks(h, fs),
@@ -275,23 +292,24 @@ func stack(h *handler, f *govulncheck.Finding) Stack {
 	trace := f.Trace
 	top := trace[len(trace)-1] // belongs to top level module
 
-	var frames []Frame
+	frames := make([]Frame, 0, len(trace)) // must not be nil
 	for i := len(trace) - 1; i >= 0; i-- { // vulnerable symbol is at the top frame
 		frame := trace[i]
-		pos := govulncheck.Position{}
+		pos := govulncheck.Position{Line: 1, Column: 1}
 		if frame.Position != nil {
 			pos = *frame.Position
 		}
 
 		sf := Frame{
-			Module:   frame.Module,
+			Module:   frame.Module + "@" + frame.Version,
 			Location: Location{Message: Description{Text: symbol(frame)}}, // show the (full) symbol name
 		}
+		file, base := fileURIInfo(pos.Filename, top.Module, frame.Module, frame.Version)
 		if h.cfg.ScanMode != govulncheck.ScanModeBinary {
 			sf.Location.PhysicalLocation = PhysicalLocation{
 				ArtifactLocation: ArtifactLocation{
-					URI:       pos.Filename,
-					URIBaseID: uriID(top.Module, frame.Module),
+					URI:       file,
+					URIBaseID: base,
 				},
 				Region: Region{
 					StartLine:   pos.Line,
@@ -341,7 +359,7 @@ func codeFlows(h *handler, fs []*govulncheck.Finding) []CodeFlow {
 }
 
 func threadFlows(h *handler, fs []*govulncheck.Finding) []ThreadFlow {
-	var tfs []ThreadFlow
+	tfs := make([]ThreadFlow, 0, len(fs)) // must not be nil
 	for _, f := range fs {
 		trace := traces.Compact(f)
 		top := trace[len(trace)-1] // belongs to top level module
@@ -351,20 +369,21 @@ func threadFlows(h *handler, fs []*govulncheck.Finding) []ThreadFlow {
 			// TODO: should we, similar to govulncheck text output, only
 			// mention three elements of the compact trace?
 			frame := trace[i]
-			pos := govulncheck.Position{}
+			pos := govulncheck.Position{Line: 1, Column: 1}
 			if frame.Position != nil {
 				pos = *frame.Position
 			}
 
 			tfl := ThreadFlowLocation{
-				Module:   frame.Module,
+				Module:   frame.Module + "@" + frame.Version,
 				Location: Location{Message: Description{Text: symbol(frame)}}, // show the (full) symbol name
 			}
+			file, base := fileURIInfo(pos.Filename, top.Module, frame.Module, frame.Version)
 			if h.cfg.ScanMode != govulncheck.ScanModeBinary {
 				tfl.Location.PhysicalLocation = PhysicalLocation{
 					ArtifactLocation: ArtifactLocation{
-						URI:       pos.Filename,
-						URIBaseID: uriID(top.Module, frame.Module),
+						URI:       file,
+						URIBaseID: base,
 					},
 					Region: Region{
 						StartLine:   pos.Line,
@@ -379,12 +398,12 @@ func threadFlows(h *handler, fs []*govulncheck.Finding) []ThreadFlow {
 	return tfs
 }
 
-func uriID(top, module string) string {
+func fileURIInfo(filename, top, module, version string) (string, string) {
 	if top == module {
-		return SrcRootID
+		return filename, SrcRootID
 	}
 	if module == internal.GoStdModulePath {
-		return GoRootID
+		return filename, GoRootID
 	}
-	return GoModCacheID
+	return filepath.ToSlash(filepath.Join(module+"@"+version, filename)), GoModCacheID
 }
