@@ -10,6 +10,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 
 ## Unreleased
 
+- align repo to current lib standard: drop vendor + tools.go, add CI, maintainer pipeline, lint + vuln-scan configs
 - update Go to 1.26.5 and update dependencies
 
 ## v1.0.1
