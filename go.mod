@@ -1,6 +1,6 @@
 module github.com/bborbe/lock
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/golang/glog v1.2.5
